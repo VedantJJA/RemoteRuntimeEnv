@@ -1,19 +1,11 @@
 package runner
 
-// Language describes how a submission in a given language is compiled and run
-// inside its sandbox container. Each language gets its own minimal image
-// (see /images) so containers start fast and carry no unnecessary tooling.
 type Language struct {
 	Name       string
 	Image      string
 	SourceFile string
-	// CompileCmd is run once before execution. Empty means no compile step
-	// (interpreted languages). Failures here are reported as CompileError,
-	// distinct from RuntimeError, so the frontend can show the right message.
 	CompileCmd []string
-	// RunCmd executes the compiled/interpreted program. Stdin is piped in;
-	// stdout/stderr are captured separately.
-	RunCmd []string
+	RunCmd     []string
 }
 
 var Languages = map[string]Language{
@@ -21,7 +13,7 @@ var Languages = map[string]Language{
 		Name:       "python",
 		Image:      "rre-python:latest",
 		SourceFile: "main.py",
-		RunCmd:     []string{"python3", "main.py"},
+		RunCmd:     []string{"python3", "-u", "main.py"},
 	},
 	"cpp": {
 		Name:       "cpp",

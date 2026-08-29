@@ -26,18 +26,7 @@ func NewServer(exec *runner.Executor, pool *queue.Pool, database *db.DB) *Server
 	s.mux.HandleFunc("/api/result", s.handleResult)
 	s.mux.HandleFunc("/api/leaderboard", s.handleLeaderboard)
 	s.mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(200)
-		_, _ = w.Write([]byte(`{"status":"ok","service":"remoteruntimeenv"}`))
-	})
-	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(200)
-		_, _ = w.Write([]byte(`{"service":"RemoteRuntimeEnv","status":"running","endpoints":{"submit":"POST /api/submit","result":"GET /api/result?id={id}","leaderboard":"GET /api/leaderboard?problem_id={problem_id}","health":"GET /healthz"}}`))
+		writeJSON(w, map[string]string{"status": "ok", "service": "remoteruntimeenv"})
 	})
 	return s
 }
@@ -45,12 +34,12 @@ func NewServer(exec *runner.Executor, pool *queue.Pool, database *db.DB) *Server
 func (s *Server) Handler() http.Handler { return s.mux }
 
 type submitReq struct {
-	ProblemID string `json:"problem_id"`
-	Language  string `json:"language"`
-	Code      string `json:"code"`
-	Stdin     string `json:"stdin"`
-	TimeLimitMS int64 `json:"time_limit_ms"`
-	MemoryMB    int64 `json:"memory_mb"`
+	ProblemID   string `json:"problem_id"`
+	Language    string `json:"language"`
+	Code        string `json:"code"`
+	Stdin       string `json:"stdin"`
+	TimeLimitMS int64  `json:"time_limit_ms"`
+	MemoryMB    int64  `json:"memory_mb"`
 }
 
 type submitResp struct {
@@ -98,8 +87,8 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 		s.db.Insert(db.Submission{
 			ID: id, ProblemID: req.ProblemID, Language: req.Language,
-			Verdict: string(res.Verdict), WallTimeMS: res.WallTimeMS,
-			PeakMemKB: res.PeakMemKB, CreatedAt: time.Now(),
+			Verdict: string(res.Verdict), Stdout: res.Stdout, Stderr: res.Stderr,
+			WallTimeMS: res.WallTimeMS, PeakMemKB: res.PeakMemKB, CreatedAt: time.Now(),
 		})
 	}})
 

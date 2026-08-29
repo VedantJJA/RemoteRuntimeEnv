@@ -1,24 +1,20 @@
 package runner
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"strings"
+	"os"
+	"path/filepath"
 	"time"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
-// Verdict mirrors the classic online-judge status set. Keeping this small
-// and explicit (rather than free-text errors) is what lets the leaderboard
-// and frontend treat "why did this fail" consistently.
 type Verdict string
 
 const (
@@ -41,9 +37,9 @@ type Result struct {
 }
 
 type Limits struct {
-	TimeLimit   time.Duration // wall clock for the RUN phase only
+	TimeLimit   time.Duration
 	MemoryMB    int64
-	CompileTime time.Duration // fixed generous cap, not part of scoring
+	CompileTime time.Duration
 }
 
 type Executor struct {
@@ -57,47 +53,44 @@ func NewExecutor(workDir string) (*Executor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}
+	if err := os.MkdirAll(workDir, 0777); err != nil {
+		return nil, err
+	}
+	_ = os.Chmod(workDir, 0777)
 	return &Executor{cli: cli, workDir: workDir, pidsLimit: 64}, nil
 }
 
-// createTarArchive builds an in-memory tar stream containing a single file
-func createTarArchive(filename, content string) io.Reader {
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	hdr := &tar.Header{
-		Name: filename,
-		Mode: 0644,
-		Size: int64(len(content)),
-	}
-	_ = tw.WriteHeader(hdr)
-	_, _ = tw.Write([]byte(content))
-	_ = tw.Close()
-	return &buf
-}
-
-// Run executes the submission inside an isolated container
 func (e *Executor) Run(ctx context.Context, lang Language, code, stdin string, lim Limits) (*Result, error) {
-	tarStream := createTarArchive(lang.SourceFile, code)
+	subDir := filepath.Join(e.workDir, fmt.Sprintf("sub-%d", time.Now().UnixNano()))
+	if err := os.MkdirAll(subDir, 0777); err != nil {
+		return nil, err
+	}
+	_ = os.Chmod(subDir, 0777)
+	defer os.RemoveAll(subDir)
 
-	var cmd []string
+	srcPath := filepath.Join(subDir, lang.SourceFile)
+	if err := os.WriteFile(srcPath, []byte(code), 0666); err != nil {
+		return nil, err
+	}
+	_ = os.Chmod(srcPath, 0666)
+
 	if len(lang.CompileCmd) > 0 {
-		compileStr := strings.Join(lang.CompileCmd, " ")
-		runStr := strings.Join(lang.RunCmd, " ")
-		cmd = []string{"/bin/sh", "-c", fmt.Sprintf("%s && %s", compileStr, runStr)}
-	} else {
-		cmd = lang.RunCmd
+		compileCtx, cancel := context.WithTimeout(ctx, lim.CompileTime)
+		defer cancel()
+		out, exitCode, err := e.runContainer(compileCtx, lang.Image, lang.CompileCmd, subDir, "", 512, 0)
+		if err != nil {
+			return &Result{Verdict: InternalError, Stderr: err.Error()}, nil
+		}
+		if exitCode != 0 {
+			return &Result{Verdict: CompileError, Stderr: out, ExitCode: exitCode}, nil
+		}
 	}
 
-	totalTimeout := lim.TimeLimit
-	if len(lang.CompileCmd) > 0 {
-		totalTimeout += lim.CompileTime
-	}
-
-	runCtx, cancel := context.WithTimeout(ctx, totalTimeout)
+	runCtx, cancel := context.WithTimeout(ctx, lim.TimeLimit)
 	defer cancel()
 
 	start := time.Now()
-	out, exitCode, err := e.runContainer(runCtx, lang.Image, cmd, tarStream, stdin, lim.MemoryMB, lim.MemoryMB)
+	out, exitCode, err := e.runContainer(runCtx, lang.Image, lang.RunCmd, subDir, stdin, lim.MemoryMB, lim.MemoryMB)
 	elapsed := time.Since(start)
 
 	if runCtx.Err() == context.DeadlineExceeded {
@@ -110,23 +103,22 @@ func (e *Executor) Run(ctx context.Context, lang Language, code, stdin string, l
 		return &Result{Verdict: MemoryLimitExceeded, WallTimeMS: elapsed.Milliseconds()}, nil
 	}
 	verdict := Accepted
+	stderr := ""
+	stdout := out
 	if exitCode != 0 {
-		if len(lang.CompileCmd) > 0 && !strings.Contains(out, "main") && strings.Contains(out, "error") {
-			verdict = CompileError
-		} else {
-			verdict = RuntimeError
-		}
+		verdict = RuntimeError
+		stderr = out
 	}
 	return &Result{
 		Verdict:    verdict,
-		Stdout:     out,
+		Stdout:     stdout,
+		Stderr:     stderr,
 		ExitCode:   exitCode,
 		WallTimeMS: elapsed.Milliseconds(),
 	}, nil
 }
 
-// runContainer creates a single-use, network-isolated, read-only-rootfs container with tmpfs scratch space
-func (e *Executor) runContainer(ctx context.Context, image string, cmd []string, tarContent io.Reader, stdin string, memMB, swapMB int64) (string, int, error) {
+func (e *Executor) runContainer(ctx context.Context, image string, cmd []string, srcDir, stdin string, memMB, swapMB int64) (string, int, error) {
 	cfg := &container.Config{
 		Image:        image,
 		Cmd:          cmd,
@@ -148,7 +140,7 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 			CPUPeriod:  100000,
 		},
 		Mounts: []mount.Mount{
-			{Type: mount.TypeTmpfs, Target: "/sandbox"},
+			{Type: mount.TypeBind, Source: srcDir, Target: "/sandbox"},
 			{Type: mount.TypeTmpfs, Target: "/tmp"},
 		},
 	}
@@ -158,13 +150,6 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 		return "", -1, fmt.Errorf("create: %w", err)
 	}
 	defer e.cli.ContainerRemove(context.Background(), resp.ID, container.RemoveOptions{Force: true})
-
-	// Stream source code directly into /sandbox tmpfs in-memory
-	if tarContent != nil {
-		if err := e.cli.CopyToContainer(ctx, resp.ID, "/sandbox", tarContent, types.CopyToContainerOptions{AllowOverwriteDirWithFile: true}); err != nil {
-			return "", -1, fmt.Errorf("copy source: %w", err)
-		}
-	}
 
 	attach, err := e.cli.ContainerAttach(ctx, resp.ID, container.AttachOptions{
 		Stream: true, Stdin: true, Stdout: true, Stderr: true,
@@ -179,7 +164,7 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 	}
 
 	go func() {
-		if stdin != "" {
+		if len(stdin) > 0 {
 			_, _ = io.Copy(attach.Conn, bytes.NewBufferString(stdin))
 		}
 		_ = attach.CloseWrite()
@@ -195,7 +180,7 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 	statusCh, errCh := e.cli.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
 	select {
 	case <-ctx.Done():
-		_ = e.cli.ContainerKill(context.Background(), resp.ID, "SIGKILL")
+		e.cli.ContainerKill(context.Background(), resp.ID, "SIGKILL")
 		return "", -1, ctx.Err()
 	case err := <-errCh:
 		return "", -1, err
@@ -203,10 +188,10 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 		<-copyDone
 		combined := outBuf.String()
 		if errBuf.Len() > 0 {
-			if combined != "" {
+			if len(combined) > 0 {
 				combined += "\n"
 			}
-			combined += "[stderr]\n" + errBuf.String()
+			combined += errBuf.String()
 		}
 		return combined, int(status.StatusCode), nil
 	}
@@ -214,12 +199,11 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 
 func (e *Executor) Close() error { return e.cli.Close() }
 
-// PullImages makes sure every language image exists locally
 func (e *Executor) PullImages(ctx context.Context) error {
 	for _, l := range Languages {
 		_, _, err := e.cli.ImageInspectWithRaw(ctx, l.Image)
 		if err != nil {
-			return fmt.Errorf("image %s not found locally: %w", l.Image, err)
+			return fmt.Errorf("image %s not found locally, build it first (see /images): %w", l.Image, err)
 		}
 	}
 	return nil
