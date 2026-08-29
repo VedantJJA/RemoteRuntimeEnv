@@ -4,6 +4,8 @@ services:
   - name: remoteruntimeenv
     type: web
     env: docker
+    runtime: docker
+    preset: dockerfile
     plan: standard
     privileged: true
     port: 8080
