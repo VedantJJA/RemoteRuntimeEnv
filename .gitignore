@@ -1,5 +1,5 @@
 # Binaries and build artifacts
-server
+/server
 server.exe
 *.exe
 *.exe~
