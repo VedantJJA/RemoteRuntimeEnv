@@ -1,0 +1,41 @@
+# Binaries and build artifacts
+server
+server.exe
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Test and coverage artifacts
+*.test
+*.out
+coverage.txt
+
+# Database and runtime scratch directories
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+submissions/
+data/
+/var/lib/rre/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDE and OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary scratch directories
+scratch/

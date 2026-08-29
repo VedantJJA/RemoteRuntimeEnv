@@ -1,0 +1,15 @@
+.git
+.gitignore
+.dockerignore
+*.md
+*.log
+*.exe
+*.test
+*.out
+rre.db*
+/var/lib/rre
+submissions
+coverage.txt
+.vscode/
+.idea/
+scratch/

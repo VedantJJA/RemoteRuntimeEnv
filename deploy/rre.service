@@ -1,0 +1,19 @@
+[Unit]
+Description=Remote Runtime Environment backend
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+# Runs as a dedicated system user with docker-group membership, NOT root —
+# the app only needs socket access to spin up sandbox containers.
+User=rre
+Group=docker
+ExecStart=/opt/rre/server
+Restart=on-failure
+RestartSec=3
+Environment=RRE_WORKDIR=/var/lib/rre/submissions
+Environment=RRE_DB=/var/lib/rre/rre.db
+Environment=RRE_ADDR=:8080
+
+[Install]
+WantedBy=multi-user.target
