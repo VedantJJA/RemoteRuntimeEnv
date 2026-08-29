@@ -1,15 +1,14 @@
 package runner
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
@@ -57,35 +56,20 @@ func NewExecutor(workDir string) (*Executor, error) {
 	return &Executor{cli: cli, workDir: workDir, pidsLimit: 64}, nil
 }
 
-func createTarArchive(filename, content string) io.Reader {
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	hdr := &tar.Header{
-		Name:  filename,
-		Mode:  0777,
-		Uid:   1000,
-		Gid:   1000,
-		Uname: "sandbox",
-		Gname: "sandbox",
-		Size:  int64(len(content)),
-	}
-	_ = tw.WriteHeader(hdr)
-	_, _ = tw.Write([]byte(content))
-	_ = tw.Close()
-	return &buf
-}
-
 func (e *Executor) Run(ctx context.Context, lang Language, code, stdin string, lim Limits) (*Result, error) {
-	tarStream := createTarArchive(lang.SourceFile, code)
+	encodedCode := base64.StdEncoding.EncodeToString([]byte(code))
+	setupCmd := fmt.Sprintf("echo '%s' | base64 -d > /sandbox/%s", encodedCode, lang.SourceFile)
 
-	var cmd []string
+	var runScript string
 	if len(lang.CompileCmd) > 0 {
 		compileStr := strings.Join(lang.CompileCmd, " ")
 		runStr := strings.Join(lang.RunCmd, " ")
-		cmd = []string{"/bin/sh", "-c", fmt.Sprintf("%s && %s", compileStr, runStr)}
+		runScript = fmt.Sprintf("%s && %s && %s", setupCmd, compileStr, runStr)
 	} else {
-		cmd = lang.RunCmd
+		runStr := strings.Join(lang.RunCmd, " ")
+		runScript = fmt.Sprintf("%s && %s", setupCmd, runStr)
 	}
+	cmd := []string{"/bin/sh", "-c", runScript}
 
 	totalTimeout := lim.TimeLimit
 	if len(lang.CompileCmd) > 0 {
@@ -96,7 +80,7 @@ func (e *Executor) Run(ctx context.Context, lang Language, code, stdin string, l
 	defer cancel()
 
 	start := time.Now()
-	out, exitCode, err := e.runContainer(runCtx, lang.Image, cmd, tarStream, stdin, lim.MemoryMB, lim.MemoryMB)
+	out, exitCode, err := e.runContainer(runCtx, lang.Image, cmd, stdin, lim.MemoryMB, lim.MemoryMB)
 	elapsed := time.Since(start)
 
 	if runCtx.Err() == context.DeadlineExceeded {
@@ -125,7 +109,7 @@ func (e *Executor) Run(ctx context.Context, lang Language, code, stdin string, l
 	}, nil
 }
 
-func (e *Executor) runContainer(ctx context.Context, image string, cmd []string, tarContent io.Reader, stdin string, memMB, swapMB int64) (string, int, error) {
+func (e *Executor) runContainer(ctx context.Context, image string, cmd []string, stdin string, memMB, swapMB int64) (string, int, error) {
 	cfg := &container.Config{
 		Image:        image,
 		Cmd:          cmd,
@@ -169,12 +153,6 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 		return "", -1, fmt.Errorf("create: %w", err)
 	}
 	defer e.cli.ContainerRemove(context.Background(), resp.ID, container.RemoveOptions{Force: true})
-
-	if tarContent != nil {
-		if err := e.cli.CopyToContainer(ctx, resp.ID, "/sandbox", tarContent, types.CopyToContainerOptions{AllowOverwriteDirWithFile: true}); err != nil {
-			return "", -1, fmt.Errorf("copy source: %w", err)
-		}
-	}
 
 	attach, err := e.cli.ContainerAttach(ctx, resp.ID, container.AttachOptions{
 		Stream: true, Stdin: true, Stdout: true, Stderr: true,
