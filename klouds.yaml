@@ -1,0 +1,18 @@
+# klouds.yaml configuration for RemoteRuntimeEnv
+version: 1
+services:
+  - name: remoteruntimeenv
+    type: web
+    env: docker
+    plan: standard
+    privileged: true
+    port: 8080
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: RRE_ADDR
+        value: ":8080"
+      - key: RRE_WORKDIR
+        value: "/var/lib/rre/submissions"
+      - key: RRE_DB
+        value: "/var/lib/rre/rre.db"
