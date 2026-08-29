@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 )
@@ -64,7 +63,7 @@ func (e *Executor) Run(ctx context.Context, lang Language, code, stdin string, l
 	if len(lang.CompileCmd) > 0 {
 		compileStr := strings.Join(lang.CompileCmd, " ")
 		runStr := strings.Join(lang.RunCmd, " ")
-		runScript = fmt.Sprintf("%s && %s && %s", setupCmd, compileStr, runStr)
+		runScript = fmt.Sprintf("%s && %s && chmod +x %s && %s", setupCmd, compileStr, lang.RunCmd[0], runStr)
 	} else {
 		runStr := strings.Join(lang.RunCmd, " ")
 		runScript = fmt.Sprintf("%s && %s", setupCmd, runStr)
@@ -93,7 +92,10 @@ func (e *Executor) Run(ctx context.Context, lang Language, code, stdin string, l
 		return &Result{Verdict: MemoryLimitExceeded, WallTimeMS: elapsed.Milliseconds()}, nil
 	}
 	verdict := Accepted
+	stdout := out
+	stderr := ""
 	if exitCode != 0 {
+		stderr = out
 		if len(lang.CompileCmd) > 0 && !strings.Contains(out, "main") && (strings.Contains(out, "error") || strings.Contains(out, "Error")) {
 			verdict = CompileError
 		} else {
@@ -102,8 +104,8 @@ func (e *Executor) Run(ctx context.Context, lang Language, code, stdin string, l
 	}
 	return &Result{
 		Verdict:    verdict,
-		Stdout:     out,
-		Stderr:     out,
+		Stdout:     stdout,
+		Stderr:     stderr,
 		ExitCode:   exitCode,
 		WallTimeMS: elapsed.Milliseconds(),
 	}, nil
@@ -121,30 +123,13 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 		StdinOnce:    true,
 	}
 	hostCfg := &container.HostConfig{
-		NetworkMode:    "none",
-		ReadonlyRootfs: true,
+		NetworkMode: "none",
 		Resources: container.Resources{
 			PidsLimit:  &e.pidsLimit,
 			Memory:     memMB * 1024 * 1024,
 			MemorySwap: swapMB * 1024 * 1024,
 			CPUQuota:   100000,
 			CPUPeriod:  100000,
-		},
-		Mounts: []mount.Mount{
-			{
-				Type:   mount.TypeTmpfs,
-				Target: "/sandbox",
-				TmpfsOptions: &mount.TmpfsOptions{
-					Mode: 0777,
-				},
-			},
-			{
-				Type:   mount.TypeTmpfs,
-				Target: "/tmp",
-				TmpfsOptions: &mount.TmpfsOptions{
-					Mode: 0777,
-				},
-			},
 		},
 	}
 
