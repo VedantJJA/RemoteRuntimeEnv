@@ -26,7 +26,7 @@ var Languages = map[string]Language{
 		Name:       "go",
 		Image:      "rre-go:latest",
 		SourceFile: "main.go",
-		CompileCmd: []string{"go", "build", "-o", "main", "main.go"},
+		CompileCmd: []string{"go", "build", "-ldflags=-s -w", "-o", "main", "main.go"},
 		RunCmd:     []string{"./main"},
 	},
 	"javascript": {
