@@ -13,7 +13,7 @@ var Languages = map[string]Language{
 		Name:       "python",
 		Image:      "rre-python:latest",
 		SourceFile: "main.py",
-		RunCmd:     []string{"python3", "-u", "main.py"},
+		RunCmd:     []string{"python3", "-B", "-u", "main.py"},
 	},
 	"cpp": {
 		Name:       "cpp",
