@@ -1,4 +1,4 @@
-# klouds.yaml configuration for RemoteRuntimeEnv
+# Cloud platform deployment configuration
 version: 1
 services:
   - name: remoteruntimeenv
