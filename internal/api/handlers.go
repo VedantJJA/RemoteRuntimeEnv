@@ -25,7 +25,20 @@ func NewServer(exec *runner.Executor, pool *queue.Pool, database *db.DB) *Server
 	s.mux.HandleFunc("/api/submit", s.handleSubmit)
 	s.mux.HandleFunc("/api/result", s.handleResult)
 	s.mux.HandleFunc("/api/leaderboard", s.handleLeaderboard)
-	s.mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
+	s.mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"status":"ok","service":"remoteruntimeenv"}`))
+	})
+	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"service":"RemoteRuntimeEnv","status":"running","endpoints":{"submit":"POST /api/submit","result":"GET /api/result?id={id}","leaderboard":"GET /api/leaderboard?problem_id={problem_id}","health":"GET /healthz"}}`))
+	})
 	return s
 }
 
@@ -36,9 +49,6 @@ type submitReq struct {
 	Language  string `json:"language"`
 	Code      string `json:"code"`
 	Stdin     string `json:"stdin"`
-	// Per-problem limits, set by whoever authored the problem — a tight
-	// limit on an easy problem and a generous one on a hard problem is how
-	// "efficiency matched" gets enforced per-task rather than globally.
 	TimeLimitMS int64 `json:"time_limit_ms"`
 	MemoryMB    int64 `json:"memory_mb"`
 }
@@ -47,10 +57,6 @@ type submitResp struct {
 	ID string `json:"id"`
 }
 
-// handleSubmit validates the request, queues the (potentially slow)
-// container execution on the worker pool, and returns immediately with an
-// ID. This keeps the HTTP handler itself fast and lets the pool apply
-// backpressure independently of how many HTTP connections are open.
 func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -67,16 +73,13 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.TimeLimitMS <= 0 || req.TimeLimitMS > 10000 {
-		req.TimeLimitMS = 2000 // sane default + hard ceiling regardless of client input
+		req.TimeLimitMS = 2000
 	}
 	if req.MemoryMB <= 0 || req.MemoryMB > 512 {
 		req.MemoryMB = 128
 	}
 
 	id := uuid.NewString()
-	// Pre-register a PENDING row synchronously so /api/result never 404s
-	// for a submission that was genuinely accepted, even before the worker
-	// picks it up.
 	_ = s.db.Insert(db.Submission{
 		ID: id, ProblemID: req.ProblemID, Language: req.Language,
 		Verdict: "PENDING", CreatedAt: time.Now(),
