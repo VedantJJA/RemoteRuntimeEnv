@@ -1,12 +1,12 @@
 package runner
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -47,7 +47,7 @@ type Limits struct {
 
 type Executor struct {
 	cli       *client.Client
-	workDir   string // host path where submission source trees are staged
+	workDir   string
 	pidsLimit int64
 }
 
@@ -56,45 +56,47 @@ func NewExecutor(workDir string) (*Executor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}
-	if err := os.MkdirAll(workDir, 0755); err != nil {
-		return nil, err
-	}
 	return &Executor{cli: cli, workDir: workDir, pidsLimit: 64}, nil
 }
 
-// Run stages the submission on disk, compiles it if needed, then executes it
-// inside a locked-down container and reports the verdict + measured cost.
-// A fresh container is used per submission (never reused) so state from one
-// participant's run can never leak into another's — this is what makes
-// results reproducible/deterministic across retries.
+// createTarArchive builds an in-memory tar stream containing a single file
+func createTarArchive(filename, content string) io.Reader {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	hdr := &tar.Header{
+		Name: filename,
+		Mode: 0644,
+		Size: int64(len(content)),
+	}
+	_ = tw.WriteHeader(hdr)
+	_, _ = tw.Write([]byte(content))
+	_ = tw.Close()
+	return &buf
+}
+
+// Run executes the submission inside an isolated container
 func (e *Executor) Run(ctx context.Context, lang Language, code, stdin string, lim Limits) (*Result, error) {
-	subDir := filepath.Join(e.workDir, fmt.Sprintf("sub-%d", time.Now().UnixNano()))
-	if err := os.MkdirAll(subDir, 0755); err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(subDir)
+	tarStream := createTarArchive(lang.SourceFile, code)
 
-	if err := os.WriteFile(filepath.Join(subDir, lang.SourceFile), []byte(code), 0644); err != nil {
-		return nil, err
-	}
-
+	var cmd []string
 	if len(lang.CompileCmd) > 0 {
-		compileCtx, cancel := context.WithTimeout(ctx, lim.CompileTime)
-		defer cancel()
-		out, exitCode, err := e.runContainer(compileCtx, lang.Image, lang.CompileCmd, subDir, "", 512, 0)
-		if err != nil {
-			return &Result{Verdict: InternalError, CompileLog: err.Error()}, nil
-		}
-		if exitCode != 0 {
-			return &Result{Verdict: CompileError, CompileLog: out, ExitCode: exitCode}, nil
-		}
+		compileStr := strings.Join(lang.CompileCmd, " ")
+		runStr := strings.Join(lang.RunCmd, " ")
+		cmd = []string{"/bin/sh", "-c", fmt.Sprintf("%s && %s", compileStr, runStr)}
+	} else {
+		cmd = lang.RunCmd
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, lim.TimeLimit)
+	totalTimeout := lim.TimeLimit
+	if len(lang.CompileCmd) > 0 {
+		totalTimeout += lim.CompileTime
+	}
+
+	runCtx, cancel := context.WithTimeout(ctx, totalTimeout)
 	defer cancel()
 
 	start := time.Now()
-	out, exitCode, err := e.runContainer(runCtx, lang.Image, lang.RunCmd, subDir, stdin, lim.MemoryMB, lim.MemoryMB)
+	out, exitCode, err := e.runContainer(runCtx, lang.Image, cmd, tarStream, stdin, lim.MemoryMB, lim.MemoryMB)
 	elapsed := time.Since(start)
 
 	if runCtx.Err() == context.DeadlineExceeded {
@@ -103,14 +105,16 @@ func (e *Executor) Run(ctx context.Context, lang Language, code, stdin string, l
 	if err != nil {
 		return &Result{Verdict: InternalError, Stderr: err.Error()}, nil
 	}
-	// Docker reports OOM-killed containers with exit code 137 (128+SIGKILL).
-	// We treat that specifically as MLE rather than a generic runtime crash.
 	if exitCode == 137 {
 		return &Result{Verdict: MemoryLimitExceeded, WallTimeMS: elapsed.Milliseconds()}, nil
 	}
 	verdict := Accepted
 	if exitCode != 0 {
-		verdict = RuntimeError
+		if len(lang.CompileCmd) > 0 && !strings.Contains(out, "main") && strings.Contains(out, "error") {
+			verdict = CompileError
+		} else {
+			verdict = RuntimeError
+		}
 	}
 	return &Result{
 		Verdict:    verdict,
@@ -120,11 +124,8 @@ func (e *Executor) Run(ctx context.Context, lang Language, code, stdin string, l
 	}, nil
 }
 
-// runContainer creates a single-use, network-isolated, read-only-rootfs
-// container, feeds it stdin, and returns combined stdout+stderr and its
-// exit code. memMB/swapMB set equal disables swap so an over-limit process
-// is OOM-killed immediately instead of thrashing the host.
-func (e *Executor) runContainer(ctx context.Context, image string, cmd []string, srcDir, stdin string, memMB, swapMB int64) (string, int, error) {
+// runContainer creates a single-use, network-isolated, read-only-rootfs container with tmpfs scratch space
+func (e *Executor) runContainer(ctx context.Context, image string, cmd []string, tarContent io.Reader, stdin string, memMB, swapMB int64) (string, int, error) {
 	cfg := &container.Config{
 		Image:        image,
 		Cmd:          cmd,
@@ -141,13 +142,13 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 		Resources: container.Resources{
 			PidsLimit:  &e.pidsLimit,
 			Memory:     memMB * 1024 * 1024,
-			MemorySwap: swapMB * 1024 * 1024, // == Memory -> swap disabled
-			CPUQuota:   100000,               // 1 CPU
+			MemorySwap: swapMB * 1024 * 1024,
+			CPUQuota:   100000,
 			CPUPeriod:  100000,
 		},
 		Mounts: []mount.Mount{
-			{Type: mount.TypeBind, Source: srcDir, Target: "/sandbox"},
-			{Type: mount.TypeTmpfs, Target: "/tmp"}, // writable scratch only
+			{Type: mount.TypeTmpfs, Target: "/sandbox"},
+			{Type: mount.TypeTmpfs, Target: "/tmp"},
 		},
 	}
 
@@ -156,6 +157,13 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 		return "", -1, fmt.Errorf("create: %w", err)
 	}
 	defer e.cli.ContainerRemove(context.Background(), resp.ID, container.RemoveOptions{Force: true})
+
+	// Stream source code directly into /sandbox tmpfs in-memory
+	if tarContent != nil {
+		if err := e.cli.CopyToContainer(ctx, resp.ID, "/sandbox", tarContent, container.CopyToContainerOptions{}); err != nil {
+			return "", -1, fmt.Errorf("copy source: %w", err)
+		}
+	}
 
 	attach, err := e.cli.ContainerAttach(ctx, resp.ID, container.AttachOptions{
 		Stream: true, Stdin: true, Stdout: true, Stderr: true,
@@ -170,8 +178,10 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 	}
 
 	go func() {
-		io.Copy(attach.Conn, bytes.NewBufferString(stdin))
-		attach.CloseWrite()
+		if stdin != "" {
+			_, _ = io.Copy(attach.Conn, bytes.NewBufferString(stdin))
+		}
+		_ = attach.CloseWrite()
 	}()
 
 	var outBuf, errBuf bytes.Buffer
@@ -184,9 +194,7 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 	statusCh, errCh := e.cli.ContainerWait(ctx, resp.ID, container.WaitConditionNotRunning)
 	select {
 	case <-ctx.Done():
-		// Hard kill: this is what turns an infinite loop into a clean
-		// TLE verdict instead of a hung request.
-		e.cli.ContainerKill(context.Background(), resp.ID, "SIGKILL")
+		_ = e.cli.ContainerKill(context.Background(), resp.ID, "SIGKILL")
 		return "", -1, ctx.Err()
 	case err := <-errCh:
 		return "", -1, err
@@ -194,7 +202,10 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 		<-copyDone
 		combined := outBuf.String()
 		if errBuf.Len() > 0 {
-			combined += "\n[stderr]\n" + errBuf.String()
+			if combined != "" {
+				combined += "\n"
+			}
+			combined += "[stderr]\n" + errBuf.String()
 		}
 		return combined, int(status.StatusCode), nil
 	}
@@ -202,14 +213,12 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 
 func (e *Executor) Close() error { return e.cli.Close() }
 
-// PullImages makes sure every language image exists locally before the
-// server starts accepting traffic, so the first submission of a contest
-// doesn't pay a cold pull.
+// PullImages makes sure every language image exists locally
 func (e *Executor) PullImages(ctx context.Context) error {
 	for _, l := range Languages {
 		_, _, err := e.cli.ImageInspectWithRaw(ctx, l.Image)
 		if err != nil {
-			return fmt.Errorf("image %s not found locally, build it first (see /images): %w", l.Image, err)
+			return fmt.Errorf("image %s not found locally: %w", l.Image, err)
 		}
 	}
 	return nil
