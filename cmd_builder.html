@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RRE Command Generator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1e40af;
+            --bg-page: #f8fafc;
+            --bg-card: #ffffff;
+            --border-color: #cbd5e1;
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --code-bg: #0f172a;
+            --code-text: #f1f5f9;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-page);
+            color: var(--text-main);
+            line-height: 1.5;
+            font-size: 14px;
+            padding: 24px 16px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 28px;
+        }
+
+        header {
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        h1 {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-main);
+            margin-bottom: 4px;
+        }
+
+        p.subtitle {
+            color: var(--text-muted);
+            font-size: 13.5px;
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 6px;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 20px;
+            overflow-x: auto;
+        }
+
+        .nav-tab {
+            padding: 9px 16px;
+            background: none;
+            border: 1px solid transparent;
+            border-bottom: none;
+            border-radius: 4px 4px 0 0;
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 13.5px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .nav-tab.active {
+            background: var(--bg-card);
+            border-color: var(--border-color);
+            color: var(--primary);
+            font-weight: 600;
+            margin-bottom: -1px;
+            border-bottom: 1px solid #ffffff;
+        }
+
+        .tab-pane {
+            display: none;
+        }
+
+        .tab-pane.active {
+            display: block;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--text-main);
+            margin-bottom: 6px;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-size: 13.5px;
+            font-family: inherit;
+            background-color: #ffffff;
+            color: var(--text-main);
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(30, 64, 175, 0.15);
+        }
+
+        textarea {
+            font-family: 'JetBrains Mono', Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            resize: vertical;
+        }
+
+        .output-section {
+            margin-top: 24px;
+            padding-top: 18px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .output-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .output-title {
+            font-weight: 600;
+            font-size: 13.5px;
+            color: var(--text-main);
+        }
+
+        .btn-copy {
+            background-color: #f1f5f9;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .btn-copy:hover {
+            background-color: #e2e8f0;
+        }
+
+        pre {
+            background-color: var(--code-bg);
+            color: var(--code-text);
+            padding: 14px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'JetBrains Mono', Consolas, monospace;
+            font-size: 12.5px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>RRE Command Generator</h1>
+        <p class="subtitle">Select options to generate copy-pasteable terminal commands.</p>
+    </header>
+
+    <div class="form-group">
+        <label for="baseUrl">Endpoint Base URL</label>
+        <input type="text" id="baseUrl" value="http://localhost:8080" placeholder="http://localhost:8080 or https://your-domain.com" oninput="updateAllTabs()">
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="nav-tabs">
+        <button class="nav-tab active" onclick="switchTab(event, 'tabSubmit')">1. Submit Code</button>
+        <button class="nav-tab" onclick="switchTab(event, 'tabResult')">2. Fetch Result</button>
+        <button class="nav-tab" onclick="switchTab(event, 'tabLeaderboard')">3. Leaderboard</button>
+        <button class="nav-tab" onclick="switchTab(event, 'tabHealth')">4. Health Check</button>
+        <button class="nav-tab" onclick="switchTab(event, 'tabSuite')">5. Full Test Suite</button>
+    </div>
+
+    <!-- Tab 1: Submit Code -->
+    <div id="tabSubmit" class="tab-pane active">
+        <div class="grid-2">
+            <div class="form-group">
+                <label for="language">Programming Language</label>
+                <select id="language" onchange="onLanguageChange()">
+                    <option value="python" selected>Python 3.12</option>
+                    <option value="cpp">C++17 (g++)</option>
+                    <option value="go">Go 1.22</option>
+                    <option value="javascript">JavaScript (Node.js 20)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="problemId">Problem ID</label>
+                <input type="text" id="problemId" value="problem_1" oninput="updateSubmitTab()">
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <div class="form-group">
+                <label for="timeLimit">Time Limit (ms)</label>
+                <input type="number" id="timeLimit" value="3000" min="500" max="10000" step="500" oninput="updateSubmitTab()">
+            </div>
+            <div class="form-group">
+                <label for="memoryMb">Memory Limit (MB)</label>
+                <input type="number" id="memoryMb" value="128" min="32" max="512" step="32" oninput="updateSubmitTab()">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="code">Source Code</label>
+            <textarea id="code" rows="7" oninput="updateSubmitTab()"></textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="stdin">Standard Input (stdin)</label>
+            <textarea id="stdin" rows="2" placeholder="Optional input parameters..." oninput="updateSubmitTab()"></textarea>
+        </div>
+
+        <div class="output-section">
+            <div class="output-header">
+                <span class="output-title">Git Bash / Linux cURL Command</span>
+                <button class="btn-copy" onclick="copyText('submitCurl')">Copy cURL</button>
+            </div>
+            <pre id="submitCurl"></pre>
+
+            <div class="output-header">
+                <span class="output-title">Windows PowerShell Command</span>
+                <button class="btn-copy" onclick="copyText('submitPs')">Copy PowerShell</button>
+            </div>
+            <pre id="submitPs"></pre>
+
+            <div class="output-header">
+                <span class="output-title">Raw JSON Payload</span>
+                <button class="btn-copy" onclick="copyText('submitJson')">Copy JSON</button>
+            </div>
+            <pre id="submitJson"></pre>
+        </div>
+    </div>
+
+    <!-- Tab 2: Fetch Result -->
+    <div id="tabResult" class="tab-pane">
+        <div class="form-group">
+            <label for="resultSubId">Submission ID (UUID)</label>
+            <input type="text" id="resultSubId" value="7f1514f8-c45b-482c-b382-fa91cea5ef32" placeholder="Paste submission ID..." oninput="updateResultTab()">
+        </div>
+
+        <div class="output-section">
+            <div class="output-header">
+                <span class="output-title">cURL Command</span>
+                <button class="btn-copy" onclick="copyText('resultCurl')">Copy cURL</button>
+            </div>
+            <pre id="resultCurl"></pre>
+
+            <div class="output-header">
+                <span class="output-title">PowerShell Command</span>
+                <button class="btn-copy" onclick="copyText('resultPs')">Copy PowerShell</button>
+            </div>
+            <pre id="resultPs"></pre>
+        </div>
+    </div>
+
+    <!-- Tab 3: Leaderboard -->
+    <div id="tabLeaderboard" class="tab-pane">
+        <div class="form-group">
+            <label for="lbProblemId">Problem ID</label>
+            <input type="text" id="lbProblemId" value="problem_1" oninput="updateLeaderboardTab()">
+        </div>
+
+        <div class="output-section">
+            <div class="output-header">
+                <span class="output-title">cURL Command</span>
+                <button class="btn-copy" onclick="copyText('lbCurl')">Copy cURL</button>
+            </div>
+            <pre id="lbCurl"></pre>
+
+            <div class="output-header">
+                <span class="output-title">PowerShell Command</span>
+                <button class="btn-copy" onclick="copyText('lbPs')">Copy PowerShell</button>
+            </div>
+            <pre id="lbPs"></pre>
+        </div>
+    </div>
+
+    <!-- Tab 4: Health Check -->
+    <div id="tabHealth" class="tab-pane">
+        <div class="output-section" style="margin-top: 0; padding-top: 0; border-top: none;">
+            <div class="output-header">
+                <span class="output-title">cURL Command</span>
+                <button class="btn-copy" onclick="copyText('healthCurl')">Copy cURL</button>
+            </div>
+            <pre id="healthCurl"></pre>
+
+            <div class="output-header">
+                <span class="output-title">PowerShell Command</span>
+                <button class="btn-copy" onclick="copyText('healthPs')">Copy PowerShell</button>
+            </div>
+            <pre id="healthPs"></pre>
+        </div>
+    </div>
+
+    <!-- Tab 5: Test Suite Script -->
+    <div id="tabSuite" class="tab-pane">
+        <p style="margin-bottom: 12px; color: var(--text-muted);">This script executes all 4 language sandboxes and leaderboard queries in sequence:</p>
+        <div class="output-header">
+            <span class="output-title">Git Bash Automated Script</span>
+            <button class="btn-copy" onclick="copyText('suiteScript')">Copy Script</button>
+        </div>
+        <pre id="suiteScript"></pre>
+    </div>
+</div>
+
+<script>
+const templates = {
+    python: {
+        code: "import sys\na, b = map(int, sys.stdin.read().split())\nprint(a + b)",
+        stdin: "15 25",
+        memory: 128
+    },
+    cpp: {
+        code: "#include <iostream>\nint main() {\n    int a, b;\n    std::cin >> a >> b;\n    std::cout << (a * b) << std::endl;\n    return 0;\n}",
+        stdin: "6 7",
+        memory: 128
+    },
+    go: {
+        code: "package main\nimport \"fmt\"\nfunc main() {\n    var a, b int\n    fmt.Scan(&a, &b)\n    fmt.Println(a + b)\n}",
+        stdin: "50 50",
+        memory: 256
+    },
+    javascript: {
+        code: "const fs = require('fs');\nconst input = fs.readFileSync(0, 'utf-8').trim().split(' ');\nconsole.log(Number(input[0]) + Number(input[1]));",
+        stdin: "100 200",
+        memory: 128
+    }
+};
+
+function getCleanBaseUrl() {
+    let url = document.getElementById("baseUrl").value.trim();
+    if (!url) url = "http://localhost:8080";
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        if (url.startsWith("localhost") || url.startsWith("127.0.0.1")) {
+            url = "http://" + url;
+        } else {
+            url = "https://" + url;
+        }
+    }
+    return url.replace(/\/$/, "");
+}
+
+function switchTab(evt, tabId) {
+    document.querySelectorAll(".nav-tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
+    if (evt && evt.target) {
+        evt.target.classList.add("active");
+    }
+    document.getElementById(tabId).classList.add("active");
+    updateAllTabs();
+}
+
+function onLanguageChange() {
+    const lang = document.getElementById("language").value;
+    const tmpl = templates[lang];
+    if (tmpl) {
+        document.getElementById("code").value = tmpl.code;
+        document.getElementById("stdin").value = tmpl.stdin;
+        document.getElementById("memoryMb").value = tmpl.memory;
+    }
+    updateSubmitTab();
+}
+
+function updateSubmitTab() {
+    const baseUrl = getCleanBaseUrl();
+    const lang = document.getElementById("language").value;
+    const problemId = document.getElementById("problemId").value;
+    const timeLimit = parseInt(document.getElementById("timeLimit").value) || 2000;
+    const memoryMb = parseInt(document.getElementById("memoryMb").value) || 128;
+    const code = document.getElementById("code").value;
+    const stdin = document.getElementById("stdin").value;
+
+    const payload = {
+        problem_id: problemId,
+        language: lang,
+        code: code,
+        stdin: stdin,
+        time_limit_ms: timeLimit,
+        memory_mb: memoryMb
+    };
+
+    document.getElementById("submitJson").textContent = JSON.stringify(payload, null, 2);
+
+    const compact = JSON.stringify(payload).replace(/'/g, "'\\''");
+    document.getElementById("submitCurl").textContent = `curl -X POST "${baseUrl}/api/submit" \\\n  -H "Content-Type: application/json" \\\n  -d '${compact}'`;
+
+    document.getElementById("submitPs").textContent = `$body = @{\n  problem_id = "${problemId}"\n  language = "${lang}"\n  code = @"\n${code}\n"@\n  stdin = "${stdin}"\n  time_limit_ms = ${timeLimit}\n  memory_mb = ${memoryMb}\n} | ConvertTo-Json\n\n$sub = Invoke-RestMethod -Uri "${baseUrl}/api/submit" -Method Post -Body $body -ContentType "application/json"\nStart-Sleep -Seconds 2\nInvoke-RestMethod -Uri "${baseUrl}/api/result?id=$($sub.id)"`;
+}
+
+function updateResultTab() {
+    const baseUrl = getCleanBaseUrl();
+    const id = document.getElementById("resultSubId").value.trim();
+    document.getElementById("resultCurl").textContent = `curl -X GET "${baseUrl}/api/result?id=${id}"`;
+    document.getElementById("resultPs").textContent = `Invoke-RestMethod -Uri "${baseUrl}/api/result?id=${id}"`;
+}
+
+function updateLeaderboardTab() {
+    const baseUrl = getCleanBaseUrl();
+    const probId = document.getElementById("lbProblemId").value.trim();
+    document.getElementById("lbCurl").textContent = `curl -X GET "${baseUrl}/api/leaderboard?problem_id=${probId}"`;
+    document.getElementById("lbPs").textContent = `Invoke-RestMethod -Uri "${baseUrl}/api/leaderboard?problem_id=${probId}"`;
+}
+
+function updateHealthTab() {
+    const baseUrl = getCleanBaseUrl();
+    document.getElementById("healthCurl").textContent = `curl -X GET "${baseUrl}/healthz"`;
+    document.getElementById("healthPs").textContent = `Invoke-RestMethod -Uri "${baseUrl}/healthz"`;
+}
+
+function updateSuiteTab() {
+    const baseUrl = getCleanBaseUrl();
+    document.getElementById("suiteScript").textContent = `BASE_URL="${baseUrl}"\n\n# 1. Test Python\necho "=== 1. Python ==="\nRESP=$(curl -s -X POST "$BASE_URL/api/submit" -H "Content-Type: application/json" -d '{"problem_id":"test_suite","language":"python","code":"import sys\\na, b = map(int, sys.stdin.read().split())\nprint(a + b)","stdin":"15 25","time_limit_ms":3000,"memory_mb":128}')\nID=$(echo "$RESP" | grep -o '"id":"[^"]*' | cut -d'"' -f4)\nsleep 2 && curl -s -X GET "$BASE_URL/api/result?id=$ID"\n\n# 2. Test C++\necho -e "\\n=== 2. C++ ==="\nRESP=$(curl -s -X POST "$BASE_URL/api/submit" -H "Content-Type: application/json" -d '{"problem_id":"test_suite","language":"cpp","code":"#include <iostream>\\nint main() { int a, b; std::cin >> a >> b; std::cout << (a * b) << std::endl; return 0; }","stdin":"6 7","time_limit_ms":3000,"memory_mb":128}')\nID=$(echo "$RESP" | grep -o '"id":"[^"]*' | cut -d'"' -f4)\nsleep 3 && curl -s -X GET "$BASE_URL/api/result?id=$ID"\n\n# 3. Test Go\necho -e "\\n=== 3. Go ==="\nRESP=$(curl -s -X POST "$BASE_URL/api/submit" -H "Content-Type: application/json" -d '{"problem_id":"test_suite","language":"go","code":"package main\\nimport \\"fmt\\"\\nfunc main() { var a, b int; fmt.Scan(&a, &b); fmt.Println(a + b) }","stdin":"50 50","time_limit_ms":3000,"memory_mb":256}')\nID=$(echo "$RESP" | grep -o '"id":"[^"]*' | cut -d'"' -f4)\nsleep 3 && curl -s -X GET "$BASE_URL/api/result?id=$ID"\n\n# 4. Test JavaScript\necho -e "\\n=== 4. JavaScript ==="\nRESP=$(curl -s -X POST "$BASE_URL/api/submit" -H "Content-Type: application/json" -d '{"problem_id":"test_suite","language":"javascript","code":"const fs = require(\\"fs\\"); const input = fs.readFileSync(0, \\"utf-8\\").trim().split(\\" \\"); console.log(Number(input[0]) + Number(input[1]));","stdin":"100 200","time_limit_ms":3000,"memory_mb":128}')\nID=$(echo "$RESP" | grep -o '"id":"[^"]*' | cut -d'"' -f4)\nsleep 2 && curl -s -X GET "$BASE_URL/api/result?id=$ID"\n\n# 5. Leaderboard\necho -e "\\n=== 5. Leaderboard ==="\ncurl -s -X GET "$BASE_URL/api/leaderboard?problem_id=test_suite"`;
+}
+
+function updateAllTabs() {
+    updateSubmitTab();
+    updateResultTab();
+    updateLeaderboardTab();
+    updateHealthTab();
+    updateSuiteTab();
+}
+
+function copyText(elementId) {
+    const text = document.getElementById(elementId).textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        alert("Command copied to clipboard.");
+    });
+}
+
+// Initial setup
+onLanguageChange();
+updateAllTabs();
+</script>
+
+</body>
+</html>
