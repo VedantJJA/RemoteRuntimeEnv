@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
@@ -160,7 +161,7 @@ func (e *Executor) runContainer(ctx context.Context, image string, cmd []string,
 
 	// Stream source code directly into /sandbox tmpfs in-memory
 	if tarContent != nil {
-		if err := e.cli.CopyToContainer(ctx, resp.ID, "/sandbox", tarContent, container.CopyToContainerOptions{}); err != nil {
+		if err := e.cli.CopyToContainer(ctx, resp.ID, "/sandbox", tarContent, types.CopyToContainerOptions{AllowOverwriteDirWithFile: true}); err != nil {
 			return "", -1, fmt.Errorf("copy source: %w", err)
 		}
 	}
