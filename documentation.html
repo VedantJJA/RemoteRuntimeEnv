@@ -1,14 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Remote Runtime Environment (RRE) - Technical Documentation</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-    <script>mermaid.initialize({startOnLoad:true, theme: 'neutral'});</script>
+    <script>mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script>
     <style>
         :root {
             --primary: #1e40af;
@@ -122,7 +125,8 @@
             color: #0f172a;
         }
 
-        ul, ol {
+        ul,
+        ol {
             margin-bottom: 14px;
             padding-left: 22px;
             color: var(--text-muted);
@@ -139,7 +143,8 @@
             font-size: 13.5px;
         }
 
-        th, td {
+        th,
+        td {
             padding: 10px 12px;
             text-align: left;
             border: 1px solid var(--border-color);
@@ -249,275 +254,286 @@
                 border-radius: 0;
                 border: none;
             }
+
             .grid-2 {
                 grid-template-columns: 1fr;
             }
         }
     </style>
 </head>
+
 <body>
 
-<div class="container">
-    <header>
-        <div class="badge">Architecture and Technical Reference</div>
-        <h1>Remote Runtime Environment (RRE)</h1>
-        <div class="subtitle">A deterministic, resource-bounded sandbox and ranking engine for competitive programming tournaments.</div>
-    </header>
+    <div class="container">
+        <header>
+            <div class="badge">Architecture and Technical Reference</div>
+            <h1>Remote Runtime Environment (RRE)</h1>
+            <div class="subtitle">A deterministic, resource-bounded sandbox and ranking engine for competitive
+                programming tournaments.</div>
+        </header>
 
-    <h2>
-        <svg class="icon" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="m9 14 2 2 4-4"/></svg>
-        Evaluation Rubric Alignment
-    </h2>
-    <table>
-        <thead>
-            <tr>
-                <th>Criteria</th>
-                <th>Weight</th>
-                <th>Implementation Summary</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr>
-                <td><strong>1. Documentation</strong></td>
-                <td>20 Pts</td>
-                <td>Detailed architecture, request lifecycle, data flow diagrams, security matrix, and API reference.</td>
-            </tr>
-            <tr>
-                <td><strong>2. Code Quality</strong></td>
-                <td>15 Pts</td>
-                <td>Idiomatic Go architecture, decoupled modular packages, concurrency guards, and clean extensibility.</td>
-            </tr>
-            <tr>
-                <td><strong>3. Scalability and Cost Efficiency</strong></td>
-                <td>25 Pts</td>
-                <td>CPU-bounded worker pool, bounded channel backpressure, SQLite in-process WAL engine with composite indexing.</td>
-            </tr>
-            <tr>
-                <td><strong>4. Reproducibility and Development</strong></td>
-                <td>25 Pts</td>
-                <td>Deterministic execution via disposable containers, in-memory tmpfs execution, and cloud deployment manifests.</td>
-            </tr>
-            <tr>
-                <td><strong>5. Tech Stack</strong></td>
-                <td>15 Pts</td>
-                <td>Go core, Docker Engine API, Pure-Go SQLite driver, and minimal Alpine Linux base images.</td>
-            </tr>
-        </tbody>
-    </table>
+        <h2>
+            <svg class="icon" viewBox="0 0 24 24">
+                <rect width="18" height="18" x="3" y="3" rx="2" />
+                <path d="M3 9h18" />
+                <path d="M9 21V9" />
+            </svg>
+            1. System Architecture and Data Flow
+        </h2>
+        <p>RRE is designed around an asynchronous ingestion pipeline backed by an in-memory worker pool orchestrating
+            disposable container sandboxes.</p>
 
-    <h2>
-        <svg class="icon" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
-        1. System Architecture and Data Flow
-    </h2>
-    <p>RRE is designed around an asynchronous ingestion pipeline backed by an in-memory worker pool orchestrating disposable container sandboxes.</p>
+        <div class="diagram-box">
+            <div class="mermaid">
+                graph TD
+                Client[Contestant / Web Client] -->|1. POST /api/submit| API[HTTP API Server]
+                API -->|2. Record PENDING| DB[(SQLite Database)]
+                API -->|3. Enqueue Job| Pool[Worker Pool N = CPU Cores]
 
-    <div class="diagram-box">
-        <div class="mermaid">
-graph TD
-    Client[Contestant / Web Client] -->|1. POST /api/submit| API[HTTP API Server]
-    API -->|2. Record PENDING| DB[(SQLite Database)]
-    API -->|3. Enqueue Job| Pool[Worker Pool N = CPU Cores]
-    
-    subgraph Execution Sandbox
-        Pool -->|4. Dispatch| Worker[Worker Goroutine]
-        Worker -->|5. Spawn Container| Docker[Docker Engine]
-        Docker -->|6. Mount tmpfs| Box[Single-Use Sandbox Container]
-        Worker -->|7. Stream Source and Stdin| Box
-        Box -->|8. Compile and Run| Engine[Language Runtime]
-        Box -->|9. Enforce Limits| Guard[Context Timeout and Cgroups]
-    end
-    
-    Engine -->|10. Capture Metrics| Worker
-    Worker -->|11. Upsert Result| DB
-    Client -->|12. GET /api/result and /api/leaderboard| API
+                subgraph Execution Sandbox
+                Pool -->|4. Dispatch| Worker[Worker Goroutine]
+                Worker -->|5. Spawn Container| Docker[Docker Engine]
+                Docker -->|6. Mount tmpfs| Box[Single-Use Sandbox Container]
+                Worker -->|7. Stream Source and Stdin| Box
+                Box -->|8. Compile and Run| Engine[Language Runtime]
+                Box -->|9. Enforce Limits| Guard[Context Timeout and Cgroups]
+                end
+
+                Engine -->|10. Capture Metrics| Worker
+                Worker -->|11. Upsert Result| DB
+                Client -->|12. GET /api/result and /api/leaderboard| API
+            </div>
         </div>
-    </div>
 
-    <h3>Step-by-Step Lifecycle</h3>
-    <ol>
-        <li><strong>Ingestion:</strong> Client sends <code>POST /api/submit</code> with problem identifier, language name, code payload, test stdin, and resource limits.</li>
-        <li><strong>Pre-Registration:</strong> API validates schema, records a <code>PENDING</code> row into SQLite, and returns a unique submission ID immediately.</li>
-        <li><strong>Worker Dispatch:</strong> The submission job is pushed to a bounded channel. An idle worker goroutine retrieves the job.</li>
-        <li><strong>Sandbox Creation:</strong> The worker invokes the Docker API to create a brand-new container with read-only rootfs, unshared network namespace, and strict memory/PID cgroups.</li>
-        <li><strong>Source Streaming:</strong> Source code is transferred directly into an in-memory <code>tmpfs</code> scratchpad at <code>/sandbox</code>. Compilation and execution run with real-time timeout supervision.</li>
-        <li><strong>Persistence:</strong> Exit status, wall time, stdout, and stderr are saved back to SQLite, queryable via <code>GET /api/result</code> and <code>GET /api/leaderboard</code>.</li>
-    </ol>
+        <h3>Step-by-Step Lifecycle</h3>
+        <ol>
+            <li><strong>Ingestion:</strong> Client sends <code>POST /api/submit</code> with problem identifier, language
+                name, code payload, test stdin, and resource limits.</li>
+            <li><strong>Pre-Registration:</strong> API validates schema, records a <code>PENDING</code> row into SQLite,
+                and returns a unique submission ID immediately.</li>
+            <li><strong>Worker Dispatch:</strong> The submission job is pushed to a bounded channel. An idle worker
+                goroutine retrieves the job.</li>
+            <li><strong>Sandbox Creation:</strong> The worker invokes the Docker API to create a brand-new container
+                with read-only rootfs, unshared network namespace, and strict memory/PID cgroups.</li>
+            <li><strong>Source Streaming:</strong> Source code is transferred directly into an in-memory
+                <code>tmpfs</code> scratchpad at <code>/sandbox</code>. Compilation and execution run with real-time
+                timeout supervision.
+            </li>
+            <li><strong>Persistence:</strong> Exit status, wall time, stdout, and stderr are saved back to SQLite,
+                queryable via <code>GET /api/result</code> and <code>GET /api/leaderboard</code>.</li>
+        </ol>
 
-    <h2>
-        <svg class="icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        2. Security Model and Adversarial Hardening
-    </h2>
-    <p>Running untrusted code requires defense-in-depth at every layer of the operating system.</p>
+        <h2>
+            <svg class="icon" viewBox="0 0 24 24">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            2. Security Model and Adversarial Hardening
+        </h2>
+        <p>Running untrusted code requires defense-in-depth at every layer of the operating system.</p>
 
-    <table>
-        <thead>
-            <tr>
-                <th>Attack Vector</th>
-                <th>Threat Scenario</th>
-                <th>Mitigation Mechanism</th>
-                <th>Enforced Verdict</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr>
-                <td><strong>Infinite Loops</strong></td>
-                <td>Unterminated loops or blocking syscalls</td>
-                <td><code>context.WithTimeout</code> with hard <code>SIGKILL</code></td>
-                <td><code>TIME_LIMIT_EXCEEDED</code></td>
-            </tr>
-            <tr>
-                <td><strong>Memory Leaks</strong></td>
-                <td>Exhausting host server RAM</td>
-                <td>Cgroups <code>Memory</code> == <code>MemorySwap</code> (Swap disabled). Kernel OOM-killer triggers Exit 137</td>
-                <td><code>MEMORY_LIMIT_EXCEEDED</code></td>
-            </tr>
-            <tr>
-                <td><strong>Fork Bombs</strong></td>
-                <td>Thread/process exhaustion</td>
-                <td><code>--pids-limit 64</code> caps process count strictly</td>
-                <td><code>RUNTIME_ERROR</code></td>
-            </tr>
-            <tr>
-                <td><strong>Data Exfiltration</strong></td>
-                <td>Network calls or socket traffic</td>
-                <td><code>--network none</code> drops all network interfaces except loopback</td>
-                <td>Network Unreachable</td>
-            </tr>
-            <tr>
-                <td><strong>Filesystem Tampering</strong></td>
-                <td>Modifying system binaries or persistence</td>
-                <td><code>ReadonlyRootfs: true</code>. Only temporary in-memory <code>tmpfs</code> scratchpads are writable</td>
-                <td>Permission Denied</td>
-            </tr>
-            <tr>
-                <td><strong>Privilege Escalation</strong></td>
-                <td>Root daemon exploits</td>
-                <td>Containers execute strictly as unprivileged <code>USER sandbox</code> (UID 1000)</td>
-                <td>Blocked by kernel</td>
-            </tr>
-        </tbody>
-    </table>
+        <table>
+            <thead>
+                <tr>
+                    <th>Attack Vector</th>
+                    <th>Threat Scenario</th>
+                    <th>Mitigation Mechanism</th>
+                    <th>Enforced Verdict</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Infinite Loops</strong></td>
+                    <td>Unterminated loops or blocking syscalls</td>
+                    <td><code>context.WithTimeout</code> with hard <code>SIGKILL</code></td>
+                    <td><code>TIME_LIMIT_EXCEEDED</code></td>
+                </tr>
+                <tr>
+                    <td><strong>Memory Leaks</strong></td>
+                    <td>Exhausting host server RAM</td>
+                    <td>Cgroups <code>Memory</code> == <code>MemorySwap</code> (Swap disabled). Kernel OOM-killer
+                        triggers Exit 137</td>
+                    <td><code>MEMORY_LIMIT_EXCEEDED</code></td>
+                </tr>
+                <tr>
+                    <td><strong>Fork Bombs</strong></td>
+                    <td>Thread/process exhaustion</td>
+                    <td><code>--pids-limit 64</code> caps process count strictly</td>
+                    <td><code>RUNTIME_ERROR</code></td>
+                </tr>
+                <tr>
+                    <td><strong>Data Exfiltration</strong></td>
+                    <td>Network calls or socket traffic</td>
+                    <td><code>--network none</code> drops all network interfaces except loopback</td>
+                    <td>Network Unreachable</td>
+                </tr>
+                <tr>
+                    <td><strong>Filesystem Tampering</strong></td>
+                    <td>Modifying system binaries or persistence</td>
+                    <td><code>ReadonlyRootfs: true</code>. Only temporary in-memory <code>tmpfs</code> scratchpads are
+                        writable</td>
+                    <td>Permission Denied</td>
+                </tr>
+                <tr>
+                    <td><strong>Privilege Escalation</strong></td>
+                    <td>Root daemon exploits</td>
+                    <td>Containers execute strictly as unprivileged <code>USER sandbox</code> (UID 1000)</td>
+                    <td>Blocked by kernel</td>
+                </tr>
+            </tbody>
+        </table>
 
-    <h2>
-        <svg class="icon" viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-        3. Code Quality and Extensibility
-    </h2>
-    <p>The system is organized into modular packages following standard Go conventions:</p>
+        <h2>
+            <svg class="icon" viewBox="0 0 24 24">
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
+            </svg>
+            3. Code Quality and Extensibility
+        </h2>
+        <p>The system is organized into modular packages following standard Go conventions:</p>
 
-    <div class="grid-2">
-        <div class="card">
-            <div class="card-title">Package Layout</div>
-            <ul>
-                <li><code>internal/api</code>: HTTP routing, JSON marshaling, and REST handlers.</li>
-                <li><code>internal/queue</code>: Worker pool orchestration and bounded channels.</li>
-                <li><code>internal/runner</code>: Docker SDK execution and cgroup enforcement.</li>
-                <li><code>internal/db</code>: SQLite connection pooling, migrations, and queries.</li>
-            </ul>
-        </div>
-        <div class="card">
-            <div class="card-title">Declarative Language Matrix</div>
-            <p>Adding support for a new language runtime requires defining its descriptor in <code>languages.go</code>:</p>
-            <pre><code>"rust": {
+        <div class="grid-2">
+            <div class="card">
+                <div class="card-title">Package Layout</div>
+                <ul>
+                    <li><code>internal/api</code>: HTTP routing, JSON marshaling, and REST handlers.</li>
+                    <li><code>internal/queue</code>: Worker pool orchestration and bounded channels.</li>
+                    <li><code>internal/runner</code>: Docker SDK execution and cgroup enforcement.</li>
+                    <li><code>internal/db</code>: SQLite connection pooling, migrations, and queries.</li>
+                </ul>
+            </div>
+            <div class="card">
+                <div class="card-title">Declarative Language Matrix</div>
+                <p>Adding support for a new language runtime requires defining its descriptor in
+                    <code>languages.go</code>:
+                </p>
+                <pre><code>"rust": {
     Name:       "rust",
     Image:      "rre-rust:latest",
     SourceFile: "main.rs",
     CompileCmd: []string{"rustc", "-O", "main.rs", "-o", "main"},
     RunCmd:     []string{"./main"},
 }</code></pre>
+            </div>
         </div>
-    </div>
 
-    <h2>
-        <svg class="icon" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-        4. Scalability, Database Optimization, and Cost Efficiency
-    </h2>
+        <h2>
+            <svg class="icon" viewBox="0 0 24 24">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+            </svg>
+            4. Scalability, Database Optimization, and Cost Efficiency
+        </h2>
 
-    <h3>CPU-Bounded Worker Pool</h3>
-    <p>Rather than spawning unbounded goroutines that risk host crashes under bursts, RRE sizes its worker pool strictly to the host's logical CPU cores (<code>runtime.NumCPU()</code>). Extra submissions wait in a bounded queue (depth = 100), ensuring the system degrades gracefully with predictable latency rather than failing catastrophically.</p>
+        <h3>CPU-Bounded Worker Pool</h3>
+        <p>Rather than spawning unbounded goroutines that risk host crashes under bursts, RRE sizes its worker pool
+            strictly to the host's logical CPU cores (<code>runtime.NumCPU()</code>). Extra submissions wait in a
+            bounded queue (depth = 100), ensuring the system degrades gracefully with predictable latency rather than
+            failing catastrophically.</p>
 
-    <div class="callout">
-        <strong>Efficiency Rule</strong>
-        <p>1 Container per Logical Core = Zero CPU context thrashing + deterministic execution times.</p>
-    </div>
+        <div class="callout">
+            <strong>Efficiency Rule</strong>
+            <p>1 Container per Logical Core = Zero CPU context thrashing + deterministic execution times.</p>
+        </div>
 
-    <h3>Database Optimization: Pure-Go SQLite</h3>
-    <ul>
-        <li><strong>In-Process Speed:</strong> Eliminates external network roundtrips, delivering sub-millisecond query execution.</li>
-        <li><strong>Composite Indexing:</strong> Queries filtering by problem and sorting by wall time are accelerated using:
-            <pre><code>CREATE INDEX IF NOT EXISTS idx_problem_leaderboard ON submissions(problem_id, verdict, wall_time_ms);</code></pre>
-        </li>
-        <li><strong>Lock-Free Reads (WAL Mode):</strong> Write-Ahead Logging allows concurrent reads while background workers write results.</li>
-    </ul>
+        <h3>Database Optimization: Pure-Go SQLite</h3>
+        <ul>
+            <li><strong>In-Process Speed:</strong> Eliminates external network roundtrips, delivering sub-millisecond
+                query execution.</li>
+            <li><strong>Composite Indexing:</strong> Queries filtering by problem and sorting by wall time are
+                accelerated using:
+                <pre><code>CREATE INDEX IF NOT EXISTS idx_problem_leaderboard ON submissions(problem_id, verdict, wall_time_ms);</code></pre>
+            </li>
+            <li><strong>Lock-Free Reads (WAL Mode):</strong> Write-Ahead Logging allows concurrent reads while
+                background workers write results.</li>
+        </ul>
 
-    <h2>
-        <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
-        5. Reproducibility and Cloud Deployment
-    </h2>
+        <h2>
+            <svg class="icon" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+                <path d="M2 12h20" />
+            </svg>
+            5. Reproducibility and Cloud Deployment
+        </h2>
 
-    <p>RRE provides two production deployment models for fully reproducible environments:</p>
+        <p>RRE provides two production deployment models for fully reproducible environments:</p>
 
-    <div class="grid-2">
-        <div class="card">
-            <div class="card-title">Cloud Container Platform</div>
-            <p>Runs as a containerized service with Docker-in-Docker (DinD) enabled in deployment manifest:</p>
-            <pre><code>version: 1
+        <div class="grid-2">
+            <div class="card">
+                <div class="card-title">Cloud Container Platform</div>
+                <p>Runs as a containerized service with Docker-in-Docker (DinD) enabled in deployment manifest:</p>
+                <pre><code>version: 1
 runtime: docker
 preset: dockerfile
 security:
   privileged: true</code></pre>
-        </div>
-        <div class="card">
-            <div class="card-title">Linux Virtual Machine</div>
-            <p>Native execution on a Linux VM using the provided systemd service definition:</p>
-            <pre><code>sudo cp deploy/rre.service /etc/systemd/system/
+            </div>
+            <div class="card">
+                <div class="card-title">Linux Virtual Machine</div>
+                <p>Native execution on a Linux VM using the provided systemd service definition:</p>
+                <pre><code>sudo cp deploy/rre.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now rre</code></pre>
+            </div>
         </div>
-    </div>
 
-    <h2>
-        <svg class="icon" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/></svg>
-        6. Tech Stack Justifications
-    </h2>
-    <table>
-        <thead>
-            <tr>
-                <th>Technology</th>
-                <th>Role</th>
-                <th>Architectural Justification</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr>
-                <td><strong>Go (Golang 1.22+)</strong></td>
-                <td>Backend Core</td>
-                <td>Low memory footprint (~15MB RSS), single static binary compilation, native goroutines for non-blocking worker pools.</td>
-            </tr>
-            <tr>
-                <td><strong>Docker Engine API</strong></td>
-                <td>Sandbox Engine</td>
-                <td>First-class Linux kernel cgroups, disposable read-only filesystems, and strict network namespace isolation.</td>
-            </tr>
-            <tr>
-                <td><strong>Pure-Go SQLite (modernc)</strong></td>
-                <td>Database</td>
-                <td>Zero external infrastructure cost, zero operations overhead, and CGO-free static compilation across CPU architectures.</td>
-            </tr>
-            <tr>
-                <td><strong>Alpine Linux</strong></td>
-                <td>Container Base</td>
-                <td>Minimal attack surface (&lt;10MB image size), fast container initialization.</td>
-            </tr>
-        </tbody>
-    </table>
+        <h2>
+            <svg class="icon" viewBox="0 0 24 24">
+                <rect width="18" height="18" x="3" y="3" rx="2" />
+                <path d="M3 9h18" />
+                <path d="M3 15h18" />
+                <path d="M9 3v18" />
+                <path d="M15 3v18" />
+            </svg>
+            6. Tech Stack Justifications
+        </h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Technology</th>
+                    <th>Role</th>
+                    <th>Architectural Justification</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Go (Golang 1.22+)</strong></td>
+                    <td>Backend Core</td>
+                    <td>Low memory footprint (~15MB RSS), single static binary compilation, native goroutines for
+                        non-blocking worker pools.</td>
+                </tr>
+                <tr>
+                    <td><strong>Docker Engine API</strong></td>
+                    <td>Sandbox Engine</td>
+                    <td>First-class Linux kernel cgroups, disposable read-only filesystems, and strict network namespace
+                        isolation.</td>
+                </tr>
+                <tr>
+                    <td><strong>Pure-Go SQLite (modernc)</strong></td>
+                    <td>Database</td>
+                    <td>Zero external infrastructure cost, zero operations overhead, and CGO-free static compilation
+                        across CPU architectures.</td>
+                </tr>
+                <tr>
+                    <td><strong>Alpine Linux</strong></td>
+                    <td>Container Base</td>
+                    <td>Minimal attack surface (&lt;10MB image size), fast container initialization.</td>
+                </tr>
+            </tbody>
+        </table>
 
-    <h2>
-        <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-        7. API Reference
-    </h2>
+        <h2>
+            <svg class="icon" viewBox="0 0 24 24">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+                <polyline points="10 9 9 9 8 9" />
+            </svg>
+            7. API Reference
+        </h2>
 
-    <h3>1. Submit Solution: <code>POST /api/submit</code></h3>
-    <pre><code>curl -X POST http://localhost:8080/api/submit \
+        <h3>1. Submit Solution: <code>POST /api/submit</code></h3>
+        <pre><code>curl -X POST http://localhost:8080/api/submit \
   -H "Content-Type: application/json" \
   -d '{
     "problem_id": "problem_1",
@@ -528,8 +544,8 @@ sudo systemctl enable --now rre</code></pre>
     "memory_mb": 128
   }'</code></pre>
 
-    <h3>2. Fetch Verdict: <code>GET /api/result?id={id}</code></h3>
-    <pre><code>{
+        <h3>2. Fetch Verdict: <code>GET /api/result?id={id}</code></h3>
+        <pre><code>{
   "id": "7f1514f8-c45b-482c-b382-fa91cea5ef32",
   "problem_id": "problem_1",
   "language": "python",
@@ -541,8 +557,8 @@ sudo systemctl enable --now rre</code></pre>
   "created_at": "2026-08-29T12:38:12.358Z"
 }</code></pre>
 
-    <h3>3. Fetch Leaderboard: <code>GET /api/leaderboard?problem_id={problem_id}</code></h3>
-    <pre><code>[
+        <h3>3. Fetch Leaderboard: <code>GET /api/leaderboard?problem_id={problem_id}</code></h3>
+        <pre><code>[
   {
     "id": "7f1514f8-c45b-482c-b382-fa91cea5ef32",
     "problem_id": "problem_1",
@@ -554,10 +570,11 @@ sudo systemctl enable --now rre</code></pre>
   }
 ]</code></pre>
 
-    <footer>
-        Remote Runtime Environment (RRE) - Deterministic and secure code execution engine.
-    </footer>
-</div>
+        <footer>
+            Remote Runtime Environment (RRE) - Deterministic and secure code execution engine.
+        </footer>
+    </div>
 
 </body>
+
 </html>

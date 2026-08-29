@@ -39,3 +39,7 @@ Thumbs.db
 
 # Temporary scratch directories
 scratch/
+
+# Local testing tools
+cmd_builder.html
+tester.html
